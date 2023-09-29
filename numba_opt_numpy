@@ -1,0 +1,110 @@
+# You should not modify this cell, it contains imports and initial values needed to do work on either
+# the CPU or the GPU.
+
+import numpy as np
+from numba import cuda, vectorize
+
+# Our hidden layer will contain 1M neurons.
+# When you assess your work below, this value will be automatically set to 100M.
+n = 1000000
+
+greyscales = np.floor(np.random.uniform(0, 255, n).astype(np.float32))
+weights = np.random.normal(.5, .1, n).astype(np.float32)
+
+# As you will recall, `numpy.exp` works on the CPU, but, cannot be used in GPU implmentations.
+# This import will work for the CPU-only boilerplate code provided below, but
+# you will need to modify this import before your GPU implementation will work.
+from numpy import exp,math
+import numpy as np
+from numba import cuda, vectorize,guvectorize,jit, float32, float64
+
+# Modify these 3 function calls to run on the GPU.
+@jit(parallel=True)
+def normalize(grayscales):
+    return grayscales / 255
+
+a = normalize(greyscales)
+# print(a)
+# print(weights)
+#%timeit normalize(greyscales)
+
+#@guvectorize([(float32[:], float32[:],float32[:])], '(n),(n) -> (n)',target='cuda')
+@jit(parallel=True)
+def weigh(values, weights):    
+    return values * weights;
+
+# b = np.empty_like(a)
+b = weigh(a, weights)
+# print(b)
+#%timeit weigh(a, weights)
+
+
+#@jit(parallel=True)
+#def activate(values):    
+#    return ( exp(values) - exp(-values) ) / ( exp(values) + exp(-values) )
+#c = activate(b)
+
+#@guvectorize([(float32[:], float32[:])], '(n) -> (n)',target='cuda',nopython=True)
+#@jit(parallel=True)
+#def activate(values,result):    
+#    for i in range(values.shape[0]):
+#         result[i] = ( math.exp(values[i]) - math.exp(values[i]) ) / ( math.exp(values[i]) + math.exp(-values[i]) )
+#c = np.empty_like(b)
+#activate(b,c)
+
+# Define a CUDA kernel for the activation function
+@cuda.jit
+def activate_kernel(values, result):
+    i = cuda.grid(1)
+    if i < values.shape[0]:
+        exp_val = math.exp(values[i])
+        result[i] = (exp_val - 1.0 / exp_val) / (exp_val + 1.0 / exp_val)
+        
+
+# Define the activation function
+def activate(values):
+    result = np.empty_like(values)
+    
+    # Configure the CUDA grid and block dimensions
+    threads_per_block = 128
+    blocks_per_grid = (values.shape[0] + threads_per_block - 1) // threads_per_block
+    
+    # Launch the CUDA kernel
+    activate_kernel[blocks_per_grid, threads_per_block](values, result)
+    
+    return result
+            
+#c = activate(b)
+
+#print(c)
+#%timeit activate(b)
+
+# Modify the body of this function to optimize data transfers and therefore speed up performance.
+# As a constraint, even after you move work to the GPU, make this function return a host array.
+def create_hidden_layer(n, greyscales, weights, exp, normalize, weigh, activate):
+    
+    normalized = normalize(greyscales)
+    weighted = weigh(normalized, weights)
+    activated = activate(weighted)
+    
+    # The assessment mechanism will expect `activated` to be a host array, so,
+    # even after you refactor this code to run on the GPU, make sure to explicitly copy
+    # `activated` back to the host.
+    return activated
+
+# You probably don't need to edit this cell, unless you change the name of any of the values being passed as
+# arguments to `create_hidden_layer` below.
+arguments = {"n":n,
+            "greyscales": greyscales,
+            "weights": weights,
+            "exp": exp,
+            "normalize": normalize,
+            "weigh": weigh,
+            "activate": activate}
+
+# Use this cell (and feel free to create others) to self-assess your function
+a = create_hidden_layer(**arguments)
+print(a)
+
+from assessment import assess
+assess(create_hidden_layer, arguments)
